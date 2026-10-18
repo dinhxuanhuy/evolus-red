@@ -1,0 +1,15 @@
+node_modules/
+dist/
+server/.env
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+.DS_Store
+
+# agent / local tooling — not part of the deliverable
+.agents/
+.claude/
+.taste-skill/
+skills-lock.json
+*.log

@@ -1,0 +1,7 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxlint/configuration_schema.json",
+  "rules": {
+    "react/set-state-in-effect": "off",
+    "react/only-export-components": "off"
+  }
+}
