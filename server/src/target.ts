@@ -142,12 +142,20 @@ export class TargetClient {
 
     const started = Date.now();
     const finalHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+    // Case-insensitive merge: a curl almost always brings its own content-type,
+    // and a duplicate header would be joined by fetch into an invalid media type.
+    const setHeader = (name: string, value: string): void => {
+      for (const key of Object.keys(finalHeaders)) {
+        if (key.toLowerCase() === name.toLowerCase()) delete finalHeaders[key];
+      }
+      finalHeaders[name] = value;
+    };
     if (Array.isArray(headers)) {
-      for (const h of headers) if (h?.name) finalHeaders[h.name] = String(h.value ?? '');
+      for (const h of headers) if (h?.name) setHeader(h.name, String(h.value ?? ''));
     } else if (headers && typeof headers === 'object') {
-      for (const [name, value] of Object.entries(headers)) finalHeaders[name] = String(value ?? '');
+      for (const [name, value] of Object.entries(headers)) setHeader(name, String(value ?? ''));
     }
-    if (session?.sendHeader && this.sessionId) finalHeaders[session.sendHeader] = this.sessionId;
+    if (session?.sendHeader && this.sessionId) setHeader(session.sendHeader, this.sessionId);
 
     const template = bodyTemplate?.trim() || '{"message": {{messageJson}}}';
     const body = renderTemplate(template, message);

@@ -39,24 +39,36 @@ function notFound(res, what) {
   sendJson(res, 404, { error: `${what} not found` });
 }
 
-/** Read + parse a JSON body (Vercel usually pre-parses it into req.body). */
+/** Read + parse a JSON body (Vercel may pre-parse it into req.body). */
 async function readJsonBody(req) {
-  if (req.body !== undefined) {
-    if (typeof req.body === 'string') {
+  // On Vercel `req.body` is a lazy getter and can throw (e.g. "invalid media
+  // type") — never let that take the whole invocation down.
+  let parsed;
+  try {
+    parsed = req.body;
+  } catch {
+    parsed = undefined;
+  }
+  if (parsed !== undefined) {
+    if (typeof parsed === 'string') {
       try {
-        return JSON.parse(req.body);
+        return JSON.parse(parsed);
       } catch {
         return {};
       }
     }
-    return req.body ?? {};
+    return parsed ?? {};
   }
-  const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
-  const raw = Buffer.concat(chunks).toString('utf8');
-  if (!raw) return {};
   try {
-    return JSON.parse(raw);
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const raw = Buffer.concat(chunks).toString('utf8');
+    if (!raw) return {};
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return {};
+    }
   } catch {
     return {};
   }
