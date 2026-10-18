@@ -70,14 +70,18 @@ export async function getWorkflow(): Promise<WorkflowInfo> {
 }
 
 export async function setWorkflowActive(active: boolean): Promise<unknown> {
+  // The Evolus REST API allows only DELETE, GET, PUT on /api/v1/workflows/{id}:
+  // PATCH returns 405 Method Not Allowed (errorCode common.unexpected).
+  // PUT here is a PARTIAL update: omitted keys keep their current value, so
+  // sending only { isActive } is enough.
   const res = await fetch(`${baseUrl}/api/v1/workflows/${config.evolus.workflowId}`, {
-    method: 'PATCH',
+    method: 'PUT',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify({ isActive: active }),
     signal: AbortSignal.timeout(20_000),
   });
   const text = await res.text();
-  if (!res.ok) throw new Error(`PATCH workflow HTTP ${res.status}: ${text.slice(0, 400)}`);
+  if (!res.ok) throw new Error(`PUT workflow HTTP ${res.status}: ${text.slice(0, 400)}`);
   return text ? JSON.parse(text) : {};
 }
 

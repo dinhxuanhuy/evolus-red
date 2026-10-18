@@ -2,7 +2,11 @@ import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
 import fs from 'node:fs';
 
-const dataDir = path.resolve(import.meta.dirname, '../data');
+// DATA_DIR lets the SQLite file live on a mounted volume (Railway/Render/Fly);
+// defaults to server/data for local runs.
+const dataDir = process.env.DATA_DIR
+  ? path.resolve(process.env.DATA_DIR)
+  : path.resolve(import.meta.dirname, '../data');
 fs.mkdirSync(dataDir, { recursive: true });
 
 export const db = new DatabaseSync(path.join(dataDir, 'evolus-red.db'));

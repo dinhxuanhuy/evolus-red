@@ -1,7 +1,8 @@
 import { ArrowRight, Crosshair, Plus, RefreshCw, Terminal } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { api, reportMdUrl, type Campaign } from '../lib/api'
+import { api, type Campaign } from '../lib/api'
+import { downloadReportHtml } from '../lib/reportHtml'
 import { dateOf, hostOf, statusMeta } from '../lib/tone'
 import {
   Badge,
@@ -48,6 +49,14 @@ export default function CampaignsPage() {
   const drafts = list.filter((c) => c.status === 'draft').length
   const withReport = list.filter((c) => c.hasReport).length
 
+  const downloadReport = async (id: string) => {
+    try {
+      downloadReportHtml(await api.report(id))
+    } catch {
+      /* report not available (yet) */
+    }
+  }
+
   return (
     <div className="space-y-4">
       <header className="flex flex-wrap items-end justify-between gap-3">
@@ -83,7 +92,7 @@ export default function CampaignsPage() {
           icon={<Crosshair aria-hidden />}
           eyebrow="Red-team log"
           title="All campaigns"
-          hint="Newest first. Row click opens the live console; the .md link downloads the exported report."
+          hint="Newest first. Row click opens the live console; the report.html link downloads the exported report."
           actions={
             <Badge variant="outline">
               {list.length} total
@@ -159,13 +168,13 @@ export default function CampaignsPage() {
                       </td>
                       <td className="px-3 py-2 text-right" onClick={(e) => e.stopPropagation()}>
                         {c.hasReport ? (
-                          <a
-                            href={reportMdUrl(c.id)}
+                          <button
+                            type="button"
+                            onClick={() => void downloadReport(c.id)}
                             className="font-mono text-[11px] text-brand hover:underline"
-                            download
                           >
-                            report.md
-                          </a>
+                            report.html
+                          </button>
                         ) : (
                           <span className="text-[11px] text-fg-faint">—</span>
                         )}

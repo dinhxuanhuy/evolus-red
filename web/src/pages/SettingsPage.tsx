@@ -1,7 +1,7 @@
 import { Bot, FlaskConical, RefreshCw, Workflow } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { api, type Meta } from '../lib/api'
+import { API_BASE, api, type Meta } from '../lib/api'
 import { Badge, Button, KeyValue, Mono, Panel, PanelBody, PanelHeader, ToneBadge } from '../components/ui'
 
 type MockInfo = {
@@ -19,21 +19,25 @@ export default function SettingsPage() {
 
   const load = useCallback(async () => {
     try {
-      const [m, mk] = await Promise.all([
-        api.meta(),
-        fetch('/api/mock/target/info').then((r) => r.json() as Promise<MockInfo>),
-      ])
-      setMeta(m)
-      setMock(mk)
+      setMeta(await api.meta())
       setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
+    }
+    try {
+      const mk = (await fetch(`${API_BASE}/api/mock/target/info`).then((r) => r.json())) as MockInfo
+      setMock(mk)
+    } catch {
+      /* mock info is optional — hidden if the endpoint is unreachable */
     }
   }, [])
 
   useEffect(() => {
     void load()
   }, [load])
+
+  /** Vercel static deployment: recorded data only — workflow control is disabled. */
+  const demo = meta?.demo?.readOnly ? meta.demo : null
 
   const toggleWorkflow = async (active: boolean) => {
     const ok = window.confirm(
@@ -100,8 +104,8 @@ export default function SettingsPage() {
               Enabling or disabling takes effect immediately and applies to every future Deep scan. Nothing is
               activated automatically — the console only asks the Evolus API when you press the button.
             </p>
-            <div className="flex items-center gap-2 border-t border-line pt-3">
-              {meta?.workflow.isActive ? (
+            <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
+              {demo ? null : meta?.workflow.isActive ? (
                 <Button variant="danger" loading={busy} onClick={() => void toggleWorkflow(false)}>
                   Disable workflow
                 </Button>
@@ -114,6 +118,11 @@ export default function SettingsPage() {
                 <RefreshCw aria-hidden /> Refresh state
               </Button>
             </div>
+            {demo ? (
+              <p className="text-[11px] leading-relaxed text-warn">
+                Read-only demo — enabling or disabling the workflow runs on the self-hosted backend only.
+              </p>
+            ) : null}
           </PanelBody>
         </Panel>
 
@@ -170,7 +179,7 @@ export default function SettingsPage() {
                 ))}
               </ul>
               <p className="mt-3 text-[11px] leading-relaxed text-fg-faint">
-                Post <Mono>{mock?.url ?? '/api/mock/target'}</Mono> with{' '}
+                Post <Mono>{`${API_BASE}${mock?.url ?? '/api/mock/target'}`}</Mono> with{' '}
                 <Mono>{'{"message": "…"}'}</Mono>. Sessions persist through the{' '}
                 <Mono>x-session-id</Mono> header — the demo curl on New campaign sets one, so the mock remembers
                 earlier rounds.

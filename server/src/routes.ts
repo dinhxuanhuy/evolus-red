@@ -65,6 +65,9 @@ api.get('/meta', async (_req, res) => {
     agents: Object.entries(config.evolus.agents).map(([key, id]) => ({ key, label: AGENT_LABELS[key] ?? key, id })),
     workflow,
     mock: { url: '/api/mock/target', info: '/api/mock/target/info' },
+    // null = full self-hosted backend; the Vercel serverless deployment sets this
+    // to { readOnly: true, note } so the console hides run controls.
+    demo: null,
   });
 });
 

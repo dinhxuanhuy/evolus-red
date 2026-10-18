@@ -1,6 +1,7 @@
 import {
   Activity,
   Crosshair,
+  FlaskConical,
   LayoutDashboard,
   Plus,
   RefreshCw,
@@ -173,6 +174,12 @@ export function Shell({ children }: { children: ReactNode }) {
       {/* -------------------------------- Content ------------------------------- */}
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar campaigns={campaigns} />
+        {meta?.demo?.readOnly ? (
+          <div className="flex shrink-0 items-center gap-2 border-b border-warn/25 bg-warn/[0.07] px-4 py-1.5">
+            <FlaskConical className="size-3.5 shrink-0 text-warn" aria-hidden />
+            <span className="min-w-0 truncate text-[11px] text-warn">{meta.demo.note}</span>
+          </div>
+        ) : null}
         <main className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto w-full max-w-[1440px] p-4 lg:p-6">{children}</div>
         </main>

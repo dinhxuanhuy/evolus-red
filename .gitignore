@@ -13,3 +13,5 @@ server/.env
 .taste-skill/
 skills-lock.json
 *.log
+.vercel
+.env*

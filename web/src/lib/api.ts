@@ -87,6 +87,8 @@ export type Meta = {
   agents: { key: string; label: string; id: string }[];
   workflow: { id: string; name: string; isActive: boolean | null; updatedAt?: string; error?: string };
   mock: { url: string; info: string };
+  /** Present on the static Vercel deployment: recorded data only, no live runs. */
+  demo?: { readOnly: boolean; note: string } | null;
 };
 
 export type ReportFinding = {
@@ -144,9 +146,15 @@ async function parse<T>(res: Response): Promise<T> {
   return (await res.json()) as T;
 }
 
-const get = <T>(path: string): Promise<T> => fetch(path).then((r) => parse<T>(r));
+// API base URL. Empty = same origin (Vite dev proxy / single-server deploy).
+// When the web app is hosted separately from the API (e.g. Vercel frontend +
+// Railway backend), set VITE_API_BASE to the public server origin at build time.
+export const API_BASE = (((import.meta.env.VITE_API_BASE as string | undefined) ?? '')).replace(/\/+$/, '');
+const at = (path: string): string => `${API_BASE}${path}`;
+
+const get = <T>(path: string): Promise<T> => fetch(at(path)).then((r) => parse<T>(r));
 const post = <T>(path: string, body?: unknown): Promise<T> =>
-  fetch(path, {
+  fetch(at(path), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -173,5 +181,3 @@ export const api = {
   testTarget: (target: TargetConfig) => post<TestResult>('/api/targets/test', { target }),
   toggleWorkflow: (active: boolean) => post<{ ok: boolean; active: boolean }>('/api/workflow/toggle', { active }),
 };
-
-export const reportMdUrl = (id: string): string => `/api/campaigns/${id}/report.md`;

@@ -11,6 +11,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
+  API_BASE,
   api,
   type Meta,
   type ParsedCurl,
@@ -34,7 +35,11 @@ import {
   cn,
 } from '../components/ui'
 
-const DEMO_CURL = `curl -s http://localhost:8787/api/mock/target \\
+// Mock target origin: deployed API when VITE_API_BASE is set, otherwise the page origin
+// (Vite dev proxy or single-server deploy).
+const MOCK_ORIGIN = API_BASE || (typeof window !== 'undefined' ? window.location.origin : '')
+
+const DEMO_CURL = `curl -s ${MOCK_ORIGIN}/api/mock/target \\
   -H 'content-type: application/json' \\
   -H 'x-session-id: evolus-demo' \\
   --data-raw '{"message":"Hello","session_id":"evolus-demo"}'`
@@ -106,6 +111,9 @@ export default function NewCampaignPage() {
   useEffect(() => {
     api.meta().then(setMeta).catch(() => setMeta(null))
   }, [])
+
+  /** Vercel static deployment: recorded data only — hide the run controls. */
+  const demo = meta?.demo?.readOnly ? meta.demo : null
 
   const methodOptions = useMemo(() => {
     const base = ['POST', 'GET']
@@ -545,33 +553,49 @@ export default function NewCampaignPage() {
                 </p>
               ) : null}
 
-              <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
-                <Button variant="primary" size="md" loading={creating === 'start'} onClick={() => void create(true)}>
-                  <Rocket aria-hidden /> Create &amp; start
-                </Button>
-                <Button size="md" loading={creating === 'draft'} onClick={() => void create(false)}>
-                  <Save aria-hidden /> Save draft
-                </Button>
-                <span className="text-[10.5px] text-fg-faint">
-                  {meta?.workflow.isActive === false && mode === 'deep'
-                    ? 'Deep scan is blocked until the workflow is enabled.'
-                    : 'You can stop a run at any time from the live console.'}
-                </span>
-              </div>
+              {demo ? (
+                <div className="flex items-start gap-1.5 rounded-sm border border-warn/30 bg-warn/[0.07] px-2 py-1.5 text-[11px] leading-relaxed text-warn">
+                  <FlaskConical className="mt-px size-3.5 shrink-0" aria-hidden />
+                  <span>
+                    <span className="font-semibold">Read-only demo —</span> {demo.note} cURL parsing and connection
+                    tests above still run live.
+                  </span>
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
+                  <Button variant="primary" size="md" loading={creating === 'start'} onClick={() => void create(true)}>
+                    <Rocket aria-hidden /> Create &amp; start
+                  </Button>
+                  <Button size="md" loading={creating === 'draft'} onClick={() => void create(false)}>
+                    <Save aria-hidden /> Save draft
+                  </Button>
+                  <span className="text-[10.5px] text-fg-faint">
+                    {meta?.workflow.isActive === false && mode === 'deep'
+                      ? 'Deep scan is blocked until the workflow is enabled.'
+                      : 'You can stop a run at any time from the live console.'}
+                  </span>
+                </div>
+              )}
             </PanelBody>
           </Panel>
 
           <Panel>
             <PanelBody className="p-3">
               <p className="text-[11px] leading-relaxed text-fg-faint">
-                No real endpoint handy? The local mock chatbot at{' '}
-                <Mono>http://localhost:8787/api/mock/target</Mono> has three planted weaknesses (system-prompt
-                leak, fake admin mode, multi-turn memory poisoning) — use the demo mock button above to try the
-                whole loop safely. Full details in{' '}
-                <Link to="/settings" className="text-brand hover:underline">
-                  Settings
-                </Link>
-                .
+                No real endpoint handy? The mock chatbot at <Mono>{MOCK_ORIGIN}/api/mock/target</Mono> has three
+                planted weaknesses (system-prompt leak, fake admin mode, multi-turn memory poisoning) — use the demo
+                mock button above to parse and test it safely.{' '}
+                {demo ? (
+                  'Starting campaigns needs the self-hosted backend (README → Run).'
+                ) : (
+                  <>
+                    Full details in{' '}
+                    <Link to="/settings" className="text-brand hover:underline">
+                      Settings
+                    </Link>
+                    .
+                  </>
+                )}
               </p>
             </PanelBody>
           </Panel>

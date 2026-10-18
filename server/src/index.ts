@@ -7,13 +7,20 @@ import { api } from './routes.ts';
 const app = express();
 app.use(express.json({ limit: '5mb' }));
 
-// CORS: allow local frontends only
+// CORS: allow local frontends plus any origins listed in CORS_ORIGINS
+// (comma-separated, e.g. the Vercel deployment domain).
+const extraOrigins = (process.env.CORS_ORIGINS ?? '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+
 app.use((req, res, next) => {
   const origin = req.headers.origin ?? '';
-  if (/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+  if (/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) || extraOrigins.includes(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('Vary', 'Origin');
   }
   if (req.method === 'OPTIONS') {
     res.sendStatus(204);
