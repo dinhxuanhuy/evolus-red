@@ -287,32 +287,80 @@ async function runDeep(campaign: CampaignRow, state: RunState): Promise<void> {
   emit(id, 'deep.execution', { executionId });
   emit(id, 'log', { level: 'info', message: `Workflow accepted the job (execution ${executionId}). The 4 steps can take 30–60 minutes.` });
 
-  const detail: ExecutionDetail = await waitForExecution(
-    executionId,
-    (d) => emit(id, 'deep.progress', { status: d.status, stepStates: d.stepStates ?? {} }),
-    { shouldStop: () => state.stopRequested },
-  );
+  const reconCount = idx;
+  const stepName = (order: number): string => DEEP_STEP_NAMES[order - 1] ?? `Step ${order}`;
+  const recorded = new Set<number>();
 
-  const outputs = detail.stepOutputs ?? {};
-  const orders = Object.keys(outputs)
-    .map((k) => Number(k))
-    .filter((n) => !Number.isNaN(n))
-    .sort((a, b) => a - b);
-  for (const order of orders) {
-    const name = DEEP_STEP_NAMES[order - 1] ?? `Step ${order}`;
-    const output = sanitize(outputs[String(order)] ?? '');
-    const durationMs = detail.stepStates?.[String(order)]?.durationMs ?? null;
-    idx += 1;
+  /** Store + announce a finished deep step the moment its output is available. */
+  const finishStep = (order: number, rawOutput: string, durationMs: number | null): void => {
+    if (recorded.has(order)) return;
+    const name = stepName(order);
+    const output = sanitize(rawOutput ?? '');
+    if (!output) return;
+    recorded.add(order);
+    const roundIdx = reconCount + order;
     const verdict = name === 'Judge' ? extractVerdict(output) : null;
-    addRound(id, idx, `deep:${name.toLowerCase()}`, {
+    addRound(id, roundIdx, `deep:${name.toLowerCase()}`, {
       response: output,
       duration_ms: durationMs ?? undefined,
       verdict,
       meta: { executionId, step: order, stepName: name },
     });
-    emit(id, 'deep.step', { idx, order, name, output, durationMs });
+    emit(id, 'deep.step', {
+      idx: roundIdx,
+      order,
+      name,
+      output,
+      durationMs,
+      verdict: verdict ? { severity: verdict.severity, passed: verdict.passed } : null,
+    });
     if (name === 'Recon') emit(id, 'recon.profile', { profile: output });
+  };
+
+  /** Phase board for the UI: which of the four agents is queued / running / done. */
+  const emitProgress = (d: ExecutionDetail): void => {
+    const steps = DEEP_STEP_NAMES.map((name, i) => {
+      const state = d.stepStates?.[String(i + 1)];
+      return {
+        order: i + 1,
+        name,
+        status: recorded.has(i + 1) ? 'Completed' : (state?.status ?? 'Pending'),
+        durationMs: state?.durationMs ?? null,
+      };
+    });
+    emit(id, 'deep.progress', { status: d.status, stepStates: d.stepStates ?? {}, steps });
+  };
+
+  /** Emit every step whose output the platform is already exposing. */
+  const deliverReadySteps = (d: ExecutionDetail): void => {
+    const executionOver = ['completed', 'failed', 'cancelled'].includes(String(d.status ?? '').toLowerCase());
+    for (const [key, raw] of Object.entries(d.stepOutputs ?? {})) {
+      const order = Number(key);
+      if (!Number.isInteger(order) || order < 1 || recorded.has(order)) continue;
+      const state = d.stepStates?.[key];
+      // The platform has been seen using both "Completed" and "done".
+      const stepDone = ['completed', 'done', 'success'].includes(String(state?.status ?? '').toLowerCase());
+      if (stepDone || executionOver) finishStep(order, String(raw ?? ''), state?.durationMs ?? null);
+    }
+  };
+
+  const detail: ExecutionDetail = await waitForExecution(
+    executionId,
+    (d) => {
+      emitProgress(d);
+      deliverReadySteps(d);
+    },
+    { shouldStop: () => state.stopRequested },
+  );
+
+  // Safety net for anything the platform only exposes once the run is over.
+  for (const [key, raw] of Object.entries(detail.stepOutputs ?? {})) {
+    const order = Number(key);
+    if (Number.isInteger(order) && order >= 1) {
+      finishStep(order, String(raw ?? ''), detail.stepStates?.[key]?.durationMs ?? null);
+    }
   }
+  emitProgress(detail);
 
   if (detail.status !== 'Completed') {
     emit(id, 'log', { level: 'warn', message: `Workflow ended with status=${detail.status}` });

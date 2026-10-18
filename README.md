@@ -42,8 +42,9 @@ hairline borders, mono labels, red action accent). All UI copy is English.
 - `src/pages/NewCampaignPage.tsx` — the curl-first flow: paste → **Parse & fill** → editable target →
   **Test connection** (benign probe, HTTP status, latency, extracted reply, reply-field suggestions) →
   campaign settings → **Create & start** or **Save draft**.
-- `src/pages/CampaignPage.tsx` — live SSE feed / rounds with verdicts / report with severity tiles and
-  `report.html` (self-contained, printable) + JSON export; start, re-run and stop controls.
+- `src/pages/CampaignPage.tsx` — live SSE feed with the AttackLoop **phase board** (Recon → Planner →
+  Attacker → Judge: status, duration, streamed output per agent) / rounds with verdicts / report with severity
+  tiles and `report.html` (self-contained, printable) + JSON export; start, re-run and stop controls.
 - `src/pages/SettingsPage.tsx` — Evolus agents, the AttackLoop workflow gate (deep scans) and the mock target.
 
 ## Run
@@ -80,7 +81,9 @@ planted weaknesses, so a demo run reliably ends with a Critical verdict on the s
 
 **Deep scan** runs the `AttackLoop` workflow on the Evolus platform instead of the local loop. It can take
 30–60 minutes per campaign and requires the workflow to be enabled — the console never activates it on its
-own; you flip it on explicitly in **Settings**.
+own; you flip it on explicitly in **Settings**. While it runs, the console polls the execution every 15 s:
+the phase board lights up each agent as the platform reports it, and every phase output is stored as its own
+round (the Judge's verdict included) the moment the platform exposes it — typically as each step finishes.
 
 ## Deploy
 

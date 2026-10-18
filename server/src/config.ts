@@ -11,7 +11,8 @@ function req(name: string, fallback = ''): string {
 export const config = {
   port: Number(process.env.PORT ?? 8787),
   evolus: {
-    baseUrl: 'https://api.evolus.ai',
+    // Overridable for local testing (a fake Evolus API) or a gateway/proxy.
+    baseUrl: (process.env.EVOLUS_BASE_URL ?? '').replace(/\/+$/, '') || 'https://api.evolus.ai',
     apiKey: req('EVOLUS_API_KEY'),
     applicationId: req('EVOLUS_APPLICATION_ID'),
     agents: {

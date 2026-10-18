@@ -1,9 +1,21 @@
-import { Download, FileJson, Play, Square, Terminal, TriangleAlert } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  Brain,
+  Download,
+  FileJson,
+  Play,
+  Scale,
+  ScanSearch,
+  Square,
+  Swords,
+  Terminal,
+  TriangleAlert,
+  type LucideIcon,
+} from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { API_BASE, api, type AppEvent, type Campaign, type Report, type Round } from '../lib/api'
 import { downloadReportHtml } from '../lib/reportHtml'
-import { dateOf, eventMeta, severityTone, statusMeta, timeOf } from '../lib/tone'
+import { dateOf, eventMeta, severityTone, statusMeta, timeOf, type Tone } from '../lib/tone'
 import {
   Badge,
   Button,
@@ -24,6 +36,109 @@ type TabValue = 'live' | 'rounds' | 'report'
 function truncate(text: string, max = 220): string {
   const clean = text.replace(/\s+/g, ' ').trim()
   return clean.length > max ? `${clean.slice(0, max)}…` : clean
+}
+
+/* --------------------------- AttackLoop phase board -------------------------- */
+
+const DEEP_PHASES: { name: string; role: string }[] = [
+  { name: 'Recon', role: 'Probes the target and builds a behavioral profile' },
+  { name: 'Planner', role: 'Turns the recon profile into attack hypotheses' },
+  { name: 'Attacker', role: 'Crafts and sends the probe payloads' },
+  { name: 'Judge', role: 'Scores every reply against the Security Policy' },
+]
+
+const PHASE_ICONS: Record<string, LucideIcon> = {
+  Recon: ScanSearch,
+  Planner: Brain,
+  Attacker: Swords,
+  Judge: Scale,
+}
+
+type PhaseStatus = 'pending' | 'running' | 'completed' | 'failed' | 'unknown'
+
+type PhaseState = {
+  order: number
+  name: string
+  role: string
+  status: PhaseStatus
+  durationMs: number | null
+  output: string | null
+  verdict: { severity: string; passed: boolean | null } | null
+}
+
+function normalizePhaseStatus(raw: unknown): PhaseStatus {
+  const s = String(raw ?? '').toLowerCase()
+  if (!s || ['pending', 'queued', 'waiting'].includes(s)) return 'pending'
+  if (['running', 'executing', 'active', 'in_progress'].includes(s) || s.includes('run') || s.includes('progress')) {
+    return 'running'
+  }
+  if (s.includes('complet') || s.includes('success') || s === 'done') return 'completed'
+  if (s.includes('fail') || s.includes('error') || s.includes('cancel')) return 'failed'
+  return 'unknown'
+}
+
+const phaseStatusWord = (raw: unknown): string => {
+  const s = normalizePhaseStatus(raw)
+  return s === 'completed' ? 'done' : s
+}
+
+/**
+ * Rebuilds the four AttackLoop phases from the event stream (live SSE or the
+ * recorded demo replay) and the stored rounds — rounds are the source of truth
+ * for outputs/verdicts, events carry the live status board.
+ */
+function derivePhases(events: AppEvent[], rounds: Round[]): PhaseState[] | null {
+  const phases: PhaseState[] = DEEP_PHASES.map((p, i) => ({
+    order: i + 1,
+    name: p.name,
+    role: p.role,
+    status: 'pending',
+    durationMs: null,
+    output: null,
+    verdict: null,
+  }))
+  let seen = false
+  const byOrder = (raw: unknown): PhaseState | undefined => {
+    const order = Number(raw)
+    return Number.isInteger(order) ? phases.find((p) => p.order === order) : undefined
+  }
+
+  for (const ev of events) {
+    if (ev.type.startsWith('deep.')) seen = true
+    if (ev.type === 'deep.progress') {
+      const steps = Array.isArray(ev.data.steps) ? (ev.data.steps as Record<string, unknown>[]) : null
+      const states = steps
+        ? steps.map((s) => [s.order, s] as const)
+        : Object.entries((ev.data.stepStates ?? {}) as Record<string, Record<string, unknown>>)
+      for (const [key, raw] of states) {
+        const p = byOrder(key)
+        if (!p || p.output) continue
+        p.status = normalizePhaseStatus(raw?.status)
+        const d = Number(raw?.durationMs)
+        if (raw?.durationMs != null && Number.isFinite(d)) p.durationMs = d
+      }
+    } else if (ev.type === 'deep.step') {
+      const p = byOrder(ev.data.order) ?? phases.find((x) => x.name.toLowerCase() === String(ev.data.name ?? '').toLowerCase())
+      if (!p) continue
+      if (ev.data.output) p.output = String(ev.data.output)
+      const d = Number(ev.data.durationMs)
+      if (ev.data.durationMs != null && Number.isFinite(d)) p.durationMs = d
+      if (p.status !== 'failed') p.status = 'completed'
+    }
+  }
+
+  for (const r of rounds) {
+    if (!r.phase.startsWith('deep:')) continue
+    seen = true
+    const p = phases.find((x) => x.name.toLowerCase() === r.phase.slice(5).trim())
+    if (!p) continue
+    if (r.response) p.output = r.response
+    if (r.durationMs != null) p.durationMs = r.durationMs
+    if (r.verdict) p.verdict = { severity: r.verdict.severity, passed: r.verdict.passed }
+    if (p.status === 'pending' || p.status === 'running') p.status = 'completed'
+  }
+
+  return seen ? phases : null
 }
 
 function eventDetail(ev: AppEvent): { text: string; level?: string } {
@@ -64,12 +179,27 @@ function eventDetail(ev: AppEvent): { text: string; level?: string } {
       return { text: `status: ${String(d.status ?? '')}` }
     case 'deep.execution':
       return { text: `workflow execution ${String(d.executionId ?? '')}` }
-    case 'deep.progress':
-      return { text: `workflow status=${String(d.status ?? '')}` }
-    case 'deep.step':
-      return {
-        text: `step ${d.order} · ${d.name} (${d.durationMs ?? '?'} ms): ${truncate(String(d.output ?? ''))}`,
+    case 'deep.progress': {
+      const steps = Array.isArray(d.steps) ? (d.steps as Record<string, unknown>[]) : []
+      if (steps.length > 0) {
+        const board = steps
+          .map((s) => {
+            const ms = s.durationMs == null ? NaN : Number(s.durationMs)
+            return `${String(s.name ?? '?')}: ${phaseStatusWord(s.status)}${Number.isFinite(ms) ? ` ${(ms / 1000).toFixed(1)}s` : ''}`
+          })
+          .join(' · ')
+        return { text: `workflow status=${String(d.status ?? '')} — ${board}` }
       }
+      return { text: `workflow status=${String(d.status ?? '')}` }
+    }
+    case 'deep.step': {
+      const ms = d.durationMs == null ? NaN : Number(d.durationMs)
+      const verdictSummary = (d.verdict ?? null) as { severity?: unknown } | null
+      const sev = verdictSummary?.severity ? ` [${String(verdictSummary.severity)}]` : ''
+      return {
+        text: `phase ${String(d.order)} · ${String(d.name)}${sev} (${Number.isFinite(ms) ? `${(ms / 1000).toFixed(1)}s` : '?'}): ${truncate(String(d.output ?? ''))}`,
+      }
+    }
     default:
       return { text: JSON.stringify(ev.data).slice(0, 200) }
   }
@@ -135,6 +265,9 @@ export default function CampaignPage() {
     }
     return () => es.close()
   }, [id, load, demo])
+
+  /** The four AttackLoop phases (null when this campaign never ran a deep scan). */
+  const phases = useMemo(() => derivePhases(events, rounds), [events, rounds])
 
   const start = async () => {
     setBusy('start')
@@ -267,7 +400,12 @@ export default function CampaignPage() {
           onChange={setTab}
         />
 
-        {tab === 'live' ? <LiveFeed events={events} running={running} /> : null}
+        {tab === 'live' ? (
+          <div>
+            {phases ? <DeepPhases phases={phases} executionId={campaign.workflowExecutionId} /> : null}
+            <LiveFeed events={events} running={running} />
+          </div>
+        ) : null}
         {tab === 'rounds' ? <RoundsList rounds={rounds} /> : null}
         {tab === 'report' ? (
           campaign.hasReport ? (
@@ -286,6 +424,91 @@ export default function CampaignPage() {
 }
 
 /* --------------------------------- Live feed -------------------------------- */
+
+/** AttackLoop phase board — one card per platform agent, updated live. */
+function DeepPhases({ phases, executionId }: { phases: PhaseState[]; executionId: string | null }) {
+  const done = phases.filter((p) => p.status === 'completed').length
+  return (
+    <section className="border-b border-line">
+      <div className="flex flex-wrap items-start justify-between gap-2 px-3 py-2">
+        <div>
+          <div className="ink-label">AttackLoop workflow · deep scan phases</div>
+          <p className="mt-0.5 text-[11px] text-fg-subtle">
+            Four platform agents run in sequence — each phase reports here the moment the platform returns it.
+          </p>
+        </div>
+        <div className="flex items-center gap-1.5">
+          {executionId ? (
+            <Badge variant="outline" className="max-w-[240px] truncate normal-case" title={executionId}>
+              exec {executionId}
+            </Badge>
+          ) : null}
+          <Badge variant="outline">
+            {done}/{phases.length} done
+          </Badge>
+        </div>
+      </div>
+      <div className="grid grid-cols-1 gap-2 px-3 pb-3 sm:grid-cols-2 xl:grid-cols-4">
+        {phases.map((phase) => (
+          <PhaseCard key={phase.order} phase={phase} />
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function PhaseCard({ phase }: { phase: PhaseState }) {
+  const Icon = PHASE_ICONS[phase.name] ?? Terminal
+  const tone: Tone =
+    phase.status === 'completed'
+      ? 'ok'
+      : phase.status === 'running'
+        ? 'brand'
+        : phase.status === 'failed'
+          ? 'critical'
+          : 'muted'
+  return (
+    <div className={cn('panel-flat flex flex-col gap-1.5 px-3 py-2.5', phase.status === 'running' && 'border-brand/40')}>
+      <div className="flex items-center gap-2">
+        <span className="text-fg-subtle [&_svg]:size-3.5">
+          <Icon aria-hidden />
+        </span>
+        <span className="ink-label flex-1">phase {phase.order}</span>
+        <ToneBadge
+          tone={tone}
+          label={phase.status === 'completed' ? 'done' : phase.status}
+          className={phase.status === 'running' ? 'animate-pulse' : undefined}
+        />
+      </div>
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-[13px] font-semibold text-fg">{phase.name}</span>
+        {phase.durationMs != null ? (
+          <span className="tabular font-mono text-[10px] text-fg-faint">{(phase.durationMs / 1000).toFixed(1)}s</span>
+        ) : null}
+      </div>
+      <p className="text-[10.5px] leading-relaxed text-fg-subtle">{phase.role}</p>
+      {phase.verdict ? (
+        <div>
+          <ToneBadge tone={severityTone(phase.verdict.severity)} label={`verdict: ${phase.verdict.severity}`} dot={false} />
+        </div>
+      ) : null}
+      {phase.output ? (
+        <details className="group mt-auto">
+          <summary className="cursor-pointer list-none font-mono text-[10px] text-fg-faint transition-colors hover:text-fg-subtle">
+            output · {phase.output.length.toLocaleString()} chars · click to expand
+          </summary>
+          <pre className="mt-1.5 max-h-44 overflow-auto rounded-xs border border-line bg-surface-0/60 p-2 font-mono text-[10.5px] leading-relaxed break-words whitespace-pre-wrap text-fg-muted">
+            {phase.output}
+          </pre>
+        </details>
+      ) : (
+        <p className="mt-auto font-mono text-[10px] text-fg-faint">
+          {phase.status === 'running' ? 'running — waiting for the platform…' : phase.status === 'pending' ? 'queued' : 'no output'}
+        </p>
+      )}
+    </div>
+  )
+}
 
 function LiveFeed({ events, running }: { events: AppEvent[]; running: boolean }) {
   const ref = useRef<HTMLDivElement | null>(null)
